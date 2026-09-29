@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Черная Дыра</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; background:#000; touch-action:none; }
+  canvas { display:block; width:100vw; height:100vh; }
+  #ui {
+    position:absolute; top:10px; left:10px; color:#fff;
+    font-family:monospace; font-size:20px; pointer-events:none;
+    text-shadow:0 0 10px #0ff;
+  }
+  #gameover {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    color:#fff; font-family:monospace; font-size:24px; text-align:center;
+    display:none; background:rgba(0,0,0,0.8); padding:20px;
+    border:2px solid #0ff; border-radius:10px; box-shadow:0 0 30px #0ff;
+  }
+  #gameover button {
+    margin-top:15px; padding:10px 20px; font-size:18px;
+    background:#0ff; border:none; border-radius:5px; font-weight:bold;
+    cursor:pointer;
+  }
+</style>
+</head>
+<body>
+<div id="ui">Размер: <span id="score">15</span><br>Время: <span id="time">60</span></div>
+<div id="gameover">
+  <div>Игра окончена</div>
+  <div>Твой размер: <span id="finalScore">0</span></div>
+  <button id="restart">Ещё раз</button>
+</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let hole = { x: W/2, y: H/2, r: 15, targetX: W/2, targetY: H/2 };
+let objects = [];
+let score = 15;
+let timeLeft = 60;
+let gameActive = true;
+let lastTime = performance.now();
+
+// Управление
+function setTarget(e) {
+  if (!gameActive) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const touch = e.touches ? e.touches[0] : e;
+  hole.targetX = touch.clientX - rect.left;
+  hole.targetY = touch.clientY - rect.top;
+}
+canvas.addEventListener('touchstart', setTarget, { passive: false });
+canvas.addEventListener('touchmove', setTarget, { passive: false });
+canvas.addEventListener('mousedown', setTarget);
+canvas.addEventListener('mousemove', (e) => { if (e.buttons) setTarget(e); });
+
+// Спавн объектов
+function spawnObject() {
+  const r = 5 + Math.random() * 25;
+  const x = Math.random() * W;
+  const y = Math.random() * H;
+  const hue = Math.random() * 360;
+  objects.push({ x, y, r, hue });
+}
+
+for (let i = 0; i < 80; i++) spawnObject();
+
+// Обновление
+function update(dt) {
+  if (!gameActive) return;
+
+  timeLeft -= dt;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    endGame();
+    return;
+  }
+
+  const dx = hole.targetX - hole.x;
+  const dy = hole.targetY - hole.y;
+  hole.x += dx * 0.12;
+  hole.y += dy * 0.12;
+
+  hole.x = Math.max(hole.r, Math.min(W - hole.r, hole.x));
+  hole.y = Math.max(hole.r, Math.min(H - hole.r, hole.y));
+
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    const dist = Math.hypot(hole.x - obj.x, hole.y - obj.y);
+    if (dist < hole.r + obj.r) {
+      if (hole.r > obj.r * 1.1) {
+        // Съедаем
+        hole.r += obj.r * 0.08;
+        score = Math.floor(hole.r);
+        objects.splice(i, 1);
+        spawnObject();
+      } else {
+        // Отталкиваемся
+        const angle = Math.atan2(hole.y - obj.y, hole.x - obj.x);
+        const overlap = (hole.r + obj.r) - dist;
+        hole.x += Math.cos(angle) * overlap * 0.5;
+        hole.y += Math.sin(angle) * overlap * 0.5;
+        obj.x -= Math.cos(angle) * overlap * 0.5;
+        obj.y -= Math.sin(angle) * overlap * 0.5;
+      }
+    }
+  }
+
+  document.getElementById('score').textContent = score;
+  document.getElementById('time').textContent = Math.ceil(timeLeft);
+}
+
+// Отрисовка
+function draw() {
+  ctx.fillStyle = '#050510';
+  ctx.fillRect(0, 0, W, H);
+
+  // Сетка
+  ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
+  ctx.lineWidth = 1;
+  const gridSize = 50;
+  for (let x = 0; x < W; x += gridSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += gridSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Объекты
+  objects.forEach(obj => {
+    ctx.beginPath();
+    ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
+    ctx.fillStyle = `hsl(${obj.hue}, 80%, 60%)`;
+    ctx.shadowColor = `hsl(${obj.hue}, 80%, 60%)`;
+    ctx.shadowBlur = 15;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+
+  // Черная дыра
+  const gradient = ctx.createRadialGradient(hole.x, hole.y, 0, hole.x, hole.y, hole.r * 2);
+  gradient.addColorStop(0, '#000');
+  gradient.addColorStop(0.5, '#0ff');
+  gradient.addColorStop(1, 'rgba(0, 255, 255, 0)');
+  ctx.beginPath();
+  ctx.arc(hole.x, hole.y, hole.r * 2, 0, Math.PI * 2);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(hole.x, hole.y, hole.r, 0, Math.PI * 2);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function gameLoop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+  gameActive = false;
+  document.getElementById('gameover').style.display = 'block';
+  document.getElementById('finalScore').textContent = score;
+}
+
+function restart() {
+  hole = { x: W/2, y: H/2, r: 15, targetX: W/2, targetY: H/2 };
+  objects = [];
+  for (let i = 0; i < 80; i++) spawnObject();
+  score = 15;
+  timeLeft = 60;
+  gameActive = true;
+  document.getElementById('gameover').style.display = 'none';
+  lastTime = performance.now();
+}
+
+document.getElementById('restart').addEventListener('click', restart);
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
