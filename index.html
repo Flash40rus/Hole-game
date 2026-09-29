@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Черная Дыра</title>
+<title>Кот-Пожиратель</title>
 <style>
   html, body { margin:0; padding:0; overflow:hidden; background:#000; touch-action:none;
     font-family: -apple-system, system-ui, sans-serif; }
@@ -37,12 +37,12 @@
 <body>
 <div id="timer-bar"></div>
 <div id="ui">
-  <div class="row">🕳️ Размер: <span id="score">15</span></div>
+  <div class="row">🐱 Размер: <span id="score">15</span></div>
   <div class="row">⏱️ Время: <span id="time">60</span></div>
 </div>
 <div id="gameover">
-  <div class="title">Игра окончена</div>
-  <div>Твой размер: <span id="finalScore">0</span></div>
+  <div class="title">Кот обожрался</div>
+  <div>Размер кота: <span id="finalScore">0</span></div>
   <button id="restart">Ещё раз</button>
 </div>
 <canvas id="c"></canvas>
@@ -63,23 +63,31 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// ===== Типы объектов по размеру =====
+// ===== ЗАГРУЗКА ФОТО КОТА =====
+// ВАЖНО: Если твой файл называется иначе (например, IMG_1234.JPG),
+// поменяй имя в строке ниже на своё:
+const catImg = new Image();
+catImg.src = 'cat.png';
+let catLoaded = false;
+catImg.onload = () => { catLoaded = true; };
+
+// ===== Типы объектов =====
 const OBJECT_TYPES = [
-  { emoji: '🪙', r: 8,  points: 1 },  // монеты
-  { emoji: '🍕', r: 12, points: 2 },  // еда
-  { emoji: '🌳', r: 20, points: 3 },  // деревья
-  { emoji: '🚗', r: 26, points: 5 },  // машины
-  { emoji: '🏠', r: 36, points: 8 },  // дома
-  { emoji: '🏢', r: 50, points: 15 }, // небоскрёбы
+  { emoji: '🪙', r: 8,  points: 1 },
+  { emoji: '🍕', r: 12, points: 2 },
+  { emoji: '🌳', r: 20, points: 3 },
+  { emoji: '🚗', r: 26, points: 5 },
+  { emoji: '🏠', r: 36, points: 8 },
+  { emoji: '🏢', r: 50, points: 15 },
 ];
 
 let hole, objects, particles, score, timeLeft, gameActive, lastTime, shake;
 
 function reset() {
-  hole = { x: W/2, y: H/2, r: 15, targetX: W/2, targetY: H/2, vx: 0, vy: 0 };
+  hole = { x: W/2, y: H/2, r: 18, targetX: W/2, targetY: H/2, vx: 0, vy: 0 };
   objects = [];
   particles = [];
-  score = 15;
+  score = 18;
   timeLeft = 60;
   gameActive = true;
   shake = 0;
@@ -89,13 +97,12 @@ function reset() {
 }
 
 function spawnObject() {
-  // Вероятность типа зависит от размера дыры: сначала мелкие, потом крупные
-  const weights = OBJECT_TYPES.map((t, i) => {
+  const weights = OBJECT_TYPES.map((t) => {
     const diff = t.r - hole.r;
-    if (diff < -20) return 8;       // намного меньше — частый
-    if (diff < 0) return 5;         // меньше — обычный
-    if (diff < 10) return 2;        // чуть больше — редкий
-    return 0.5;                     // сильно больше — очень редкий
+    if (diff < -20) return 8;
+    if (diff < 0) return 5;
+    if (diff < 10) return 2;
+    return 0.5;
   });
   const total = weights.reduce((a,b)=>a+b, 0);
   let rnd = Math.random() * total;
@@ -114,10 +121,7 @@ function spawnObject() {
   } while (Math.hypot(x - hole.x, y - hole.y) < hole.r + 120 && tries < 20);
 
   objects.push({
-    x, y,
-    r: type.r,
-    emoji: type.emoji,
-    points: type.points,
+    x, y, r: type.r, emoji: type.emoji, points: type.points,
     rot: (Math.random() - 0.5) * 0.4,
     wobble: Math.random() * Math.PI * 2,
   });
@@ -143,12 +147,8 @@ function spawnParticles(x, y, color, count) {
     const a = Math.random() * Math.PI * 2;
     const sp = 2 + Math.random() * 5;
     particles.push({
-      x, y,
-      vx: Math.cos(a) * sp,
-      vy: Math.sin(a) * sp,
-      life: 1,
-      color,
-      size: 2 + Math.random() * 4,
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life: 1, color, size: 2 + Math.random() * 4,
     });
   }
 }
@@ -161,7 +161,6 @@ function update(dt) {
   if (timeLeft <= 0) { timeLeft = 0; endGame(); return; }
   document.getElementById('timer-bar').style.width = (timeLeft / 60 * 100) + '%';
 
-  // Плавное движение дыры
   const dx = hole.targetX - hole.x;
   const dy = hole.targetY - hole.y;
   hole.vx += (dx * 0.02 - hole.vx) * 0.3;
@@ -171,13 +170,11 @@ function update(dt) {
   hole.x = Math.max(hole.r, Math.min(W - hole.r, hole.x));
   hole.y = Math.max(hole.r, Math.min(H - hole.r, hole.y));
 
-  // Столкновения
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     obj.wobble += dt * 2;
     const dist = Math.hypot(hole.x - obj.x, hole.y - obj.y);
 
-    // Притяжение: объекты меньше дыры медленно втягиваются
     if (hole.r > obj.r && dist < hole.r * 2.5) {
       const pull = (1 - dist / (hole.r * 2.5)) * 2;
       const a = Math.atan2(hole.y - obj.y, hole.x - obj.x);
@@ -187,15 +184,13 @@ function update(dt) {
 
     if (dist < hole.r + obj.r * 0.6) {
       if (hole.r > obj.r * 1.05) {
-        // Съеден
         hole.r += obj.points * 0.35;
         score = Math.floor(hole.r);
-        spawnParticles(obj.x, obj.y, '#0ff', 8 + obj.points);
+        spawnParticles(obj.x, obj.y, '#ffaa00', 8 + obj.points);
         objects.splice(i, 1);
         spawnObject();
         shake = Math.min(shake + obj.points * 0.5, 12);
       } else {
-        // Отталкивание
         const angle = Math.atan2(hole.y - obj.y, hole.x - obj.x);
         const overlap = (hole.r + obj.r) - dist;
         hole.x += Math.cos(angle) * overlap * 0.4;
@@ -207,13 +202,10 @@ function update(dt) {
     }
   }
 
-  // Обновление частиц
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vx *= 0.94;
-    p.vy *= 0.94;
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.94; p.vy *= 0.94;
     p.life -= dt * 1.8;
     if (p.life <= 0) particles.splice(i, 1);
   }
@@ -231,14 +223,12 @@ function draw() {
     ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
   }
 
-  // Фон — глубокий космос
   const bg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H));
   bg.addColorStop(0, '#0a0a20');
   bg.addColorStop(1, '#000005');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Звёзды (статичные)
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   for (let i = 0; i < 60; i++) {
     const sx = (i * 137.5) % W;
@@ -247,7 +237,6 @@ function draw() {
     ctx.fillRect(sx, sy, ss, ss);
   }
 
-  // Объекты с эмодзи
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   objects.forEach(obj => {
@@ -255,17 +244,13 @@ function draw() {
     ctx.save();
     ctx.translate(obj.x, obj.y);
     ctx.rotate(obj.rot + wob);
-
-    // Тень/свечение под объектом
-    ctx.shadowColor = 'rgba(0,255,255,0.5)';
+    ctx.shadowColor = 'rgba(255,170,0,0.5)';
     ctx.shadowBlur = 8;
-
     ctx.font = `${obj.r * 2}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
     ctx.fillText(obj.emoji, 0, 0);
     ctx.restore();
   });
 
-  // Частицы
   particles.forEach(p => {
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
@@ -275,61 +260,72 @@ function draw() {
   });
   ctx.globalAlpha = 1;
 
-  // ===== Чёрная дыра =====
-  drawBlackHole();
-
+  drawCat();
   ctx.restore();
 }
 
-function drawBlackHole() {
+// ===== ОЖИВШИЙ КОТ =====
+function drawCat() {
   const { x, y, r } = hole;
+  const t = performance.now() * 0.001;
 
-  // Аккреционный диск — вращающееся свечение
-  const t = performance.now() * 0.002;
-  for (let i = 3; i >= 1; i--) {
-    const grad = ctx.createRadialGradient(x, y, r * 0.8, x, y, r * (1 + i * 0.5));
-    const hue = (t * 30 + i * 40) % 360;
-    grad.addColorStop(0, `hsla(${hue}, 100%, 60%, 0)`);
-    grad.addColorStop(0.5, `hsla(${hue}, 100%, 60%, 0.15)`);
-    grad.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
-    ctx.beginPath();
-    ctx.arc(x, y, r * (1 + i * 0.5), 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
-  }
+  // Дыхание (пульсация)
+  const breathe = 1 + Math.sin(t * 3) * 0.06;
+  // Покачивание
+  const wobbleX = Math.sin(t * 2) * 2;
+  const wobbleY = Math.cos(t * 2.5) * 2;
+  // Наклон головы
+  const tilt = Math.sin(t * 1.5) * 0.12;
 
-  // Гравитационная линза — ореол
-  const halo = ctx.createRadialGradient(x, y, r * 0.95, x, y, r * 1.6);
-  halo.addColorStop(0, 'rgba(0,255,255,0.9)');
-  halo.addColorStop(0.4, 'rgba(0,200,255,0.4)');
-  halo.addColorStop(1, 'rgba(0,100,255,0)');
+  // Золотая аура вокруг кота
+  const halo = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 2.2);
+  halo.addColorStop(0, 'rgba(255,180,80,0.55)');
+  halo.addColorStop(0.5, 'rgba(255,100,200,0.25)');
+  halo.addColorStop(1, 'rgba(255,100,200,0)');
   ctx.beginPath();
-  ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
+  ctx.arc(x, y, r * 2.2, 0, Math.PI * 2);
   ctx.fillStyle = halo;
   ctx.fill();
 
-  // Сама дыра — абсолютно чёрная
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = '#000';
-  ctx.fill();
+  // Сам кот
+  ctx.save();
+  ctx.translate(x + wobbleX, y + wobbleY);
+  ctx.rotate(tilt);
 
-  // Тонкий светящийся обод
+  const size = r * 2.2 * breathe;
+
+  if (catLoaded) {
+    // Круглая маска — чтобы фото было как аватарка
+    ctx.beginPath();
+    ctx.arc(0, 0, size / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(catImg, -size/2, -size/2, size, size);
+  } else {
+    // Заглушка, пока фото не загрузилось
+    ctx.font = `${size}px "Apple Color Emoji", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🐱', 0, 0);
+  }
+  ctx.restore();
+
+  // Неоновое кольцо вокруг кота
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.strokeStyle = '#0ff';
-  ctx.lineWidth = 2;
-  ctx.shadowColor = '#0ff';
-  ctx.shadowBlur = 15;
+  ctx.arc(x + wobbleX, y + wobbleY, r * 1.1 * breathe, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,200,100,0.9)';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#ffaa00';
+  ctx.shadowBlur = 20;
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Вращающийся блик на горизонте событий
+  // Бегущий блик по кольцу
   ctx.beginPath();
-  const a1 = t;
-  ctx.arc(x, y, r + 1, a1, a1 + Math.PI * 0.6);
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-  ctx.lineWidth = 1.5;
+  const a1 = t * 2;
+  ctx.arc(x + wobbleX, y + wobbleY, r * 1.1 * breathe, a1, a1 + Math.PI * 0.5);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2;
   ctx.stroke();
 }
 
