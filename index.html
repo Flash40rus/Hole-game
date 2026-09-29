@@ -1,346 +1,765 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Кот-Пожиратель</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#2a1f3d">
+<title>Каптер: 9 Жизней</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { width:100%; height:100%; overflow:hidden; background:#000; touch-action:none; }
-  canvas { display:block; }
+  html, body {
+    height:100%; overflow:hidden;
+    background:#2a1f3d;
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #game { display:block; width:100vw; height:100vh; }
   #hud {
-    position:fixed; top:10px; left:10px; color:#0ff;
-    font:bold 18px monospace; text-shadow:0 0 10px #0ff;
+    position:fixed; top:0; left:0; right:0;
+    padding:10px 14px; color:#fff;
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:17px; font-weight:800;
+    text-shadow:0 2px 6px rgba(0,0,0,.6);
     pointer-events:none; z-index:10;
+    gap:10px;
   }
-  #over {
-    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-    color:#fff; font:22px monospace; text-align:center; display:none;
-    background:rgba(0,0,0,.9); padding:30px; border:2px solid #0ff;
-    border-radius:16px; z-index:20;
+  #avatar {
+    width:44px; height:44px;
+    border-radius:50%;
+    object-fit:cover;
+    border:2px solid #ffb37a;
+    box-shadow:0 2px 8px rgba(0,0,0,.5);
+    background:#000;
   }
-  #over button {
-    margin-top:20px; padding:12px 30px; font:bold 18px monospace;
-    background:#0ff; border:0; border-radius:8px;
+  #lives { letter-spacing:1px; font-size:15px; }
+  #lives .lost { opacity:.2; }
+  #score { font-variant-numeric:tabular-nums; }
+  #loader {
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background:#2a1f3d; color:#ffb37a;
+    font-weight:800; font-size:18px;
+    z-index:100;
   }
 </style>
 </head>
 <body>
-<div id="hud">Размер: <span id="sz">30</span> | Время: <span id="tm">60</span></div>
-<div id="over">Кот обожрался!<br>Размер: <span id="fs">0</span><br><button onclick="start()">Ещё</button></div>
-<canvas id="c"></canvas>
+<div id="loader">Загрузка Каптера…</div>
+<canvas id="game"></canvas>
+<div id="hud">
+  <img id="avatar" src="cat.PNG" alt="Каптер">
+  <div id="lives"></div>
+  <div id="score">0</div>
+</div>
 <script>
-var canvas = document.getElementById('c');
-var ctx = canvas.getContext('2d');
-var W, H;
+(() => {
+'use strict';
 
-function resize(){
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+// ─────────────── ЗАГРУЗКА ФОТО КОТА ───────────────
+const catImg = new Image();
+catImg.crossOrigin = 'anonymous';
+let imgReady = false;
+catImg.onload = () => {
+  imgReady = true;
+  document.getElementById('loader').style.display = 'none';
+};
+catImg.onerror = () => {
+  // если фото не нашлось — играем со стилизованным котом
+  imgReady = false;
+  document.getElementById('loader').textContent = 'cat.PNG не найден — рисуем Каптера';
+  setTimeout(() => document.getElementById('loader').style.display = 'none', 1200);
+};
+catImg.src = 'cat.PNG';
+
+// ─────────────── CANVAS ───────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, groundY = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  groundY = H - 96;
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 resize();
 
-// ===== ФОТО КОТА (имя с БОЛЬШИМИ буквами PNG) =====
-var cat = new Image();
-var catOK = false;
-cat.onload = function(){ catOK = true; };
-cat.onerror = function(){ console.log('Фото cat.PNG не найдено'); };
-cat.src = 'cat.PNG';
+// ─────────────── СОСТОЯНИЕ ───────────────
+const GRAVITY = 0.95;
+const JUMP_V = -16.5;
+const MAX_JUMPS = 2;
 
-// ===== СОСТОЯНИЕ ИГРЫ =====
-var catX, catY, catR, tx, ty;
-var prevX, prevY;
-var velX = 0, velY = 0;
-var items = [];
-var size, time, alive;
-var EMOJI = ['🪙','🍕','🌳','🚗','🏠','🏢'];
-var SIZES = [10, 14, 22, 30, 42, 60];
-
-// ===== АНИМАЦИЯ КОТА =====
-var anim = {
-  blinkTimer: 2,
-  blinkActive: false,
-  blinkCooldown: 0,
-  eatSquash: 0,
-  tail: []
+const G = {
+  started: false,
+  dead: false,
+  t: 0,
+  distance: 0,
+  score: 0,
+  speed: 6,
+  lives: 9,
+  obstacles: [],
+  items: [],
+  particles: [],
+  spawnTimer: 70,
+  shake: 0,
+  invuln: 0,
+  bgOffset: 0,
 };
 
-function start(){
-  catX = W/2; catY = H/2; catR = 30;
-  prevX = catX; prevY = catY;
-  tx = W/2; ty = H/2;
-  size = 30; time = 60; alive = true;
-  items = [];
-  anim.blinkTimer = 2;
-  anim.blinkActive = false;
-  anim.eatSquash = 0;
-  anim.tail = [];
-  for (var i = 0; i < 60; i++) addItem();
-  document.getElementById('over').style.display = 'none';
+const cat = {
+  x: 0,
+  y: 0,
+  vy: 0,
+  jumps: 0,
+  sliding: false,
+  slideTimer: 0,
+  rot: 0,
+  sx: 1, sy: 1,
+};
+
+// размер «тела» кота в игре
+const CAT_W = 110;
+const CAT_H = 110;
+
+function resetGame() {
+  G.started = true;
+  G.dead = false;
+  G.t = 0;
+  G.distance = 0;
+  G.score = 0;
+  G.speed = 6;
+  G.lives = 9;
+  G.obstacles = [];
+  G.items = [];
+  G.particles = [];
+  G.spawnTimer = 70;
+  G.shake = 0;
+  G.invuln = 0;
+  cat.x = Math.max(100, W * 0.22);
+  cat.y = groundY;
+  cat.vy = 0;
+  cat.jumps = 0;
+  cat.sliding = false;
+  cat.slideTimer = 0;
+  cat.rot = 0;
+  cat.sx = 1; cat.sy = 1;
+  updateHUD();
 }
 
-function addItem(){
-  var idx = Math.floor(Math.random() * 6);
-  if (SIZES[idx] > catR && Math.random() < 0.6) {
-    idx = Math.floor(Math.random() * 3);
+// ─────────────── УПРАВЛЕНИЕ ───────────────
+function jump() {
+  if (!G.started || G.dead) return;
+  if (cat.jumps < MAX_JUMPS) {
+    cat.vy = cat.jumps === 0 ? JUMP_V : JUMP_V * 0.85;
+    cat.jumps++;
+    cat.sliding = false;
+    cat.slideTimer = 0;
+    burst(cat.x, cat.y - 20, '#fff', 6, 1.5);
   }
-  var r = SIZES[idx];
-  var x = Math.random() * (W - 100) + 50;
-  var y = Math.random() * (H - 100) + 50;
-  items.push({ x:x, y:y, r:r, e:EMOJI[idx], pts:idx+1 });
 }
 
-// ===== УПРАВЛЕНИЕ =====
-function move(e){
-  if (!alive) return;
+function slide() {
+  if (!G.started || G.dead) return;
+  cat.sliding = true;
+  cat.slideTimer = 26;
+  if (cat.y < groundY - 2) cat.vy = Math.max(cat.vy, 8);
+}
+
+let touchY = 0, touchT = 0, touchX = 0;
+
+canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  var rect = canvas.getBoundingClientRect();
-  var t = e.touches ? e.touches[0] : e;
-  tx = t.clientX - rect.left;
-  ty = t.clientY - rect.top;
+  const t = e.changedTouches[0];
+  touchX = t.clientX; touchY = t.clientY; touchT = performance.now();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  const dy = t.clientY - touchY;
+  const dx = Math.abs(t.clientX - touchX);
+  const dt = performance.now() - touchT;
+
+  if (!G.started || G.dead) { resetGame(); return; }
+
+  if (dy > 36 && dy > dx && dt < 500) slide();
+  else jump();
+}, { passive: false });
+
+canvas.addEventListener('mousedown', () => {
+  if (!G.started || G.dead) resetGame(); else jump();
+});
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+    e.preventDefault();
+    if (!G.started || G.dead) resetGame(); else jump();
+  }
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+    e.preventDefault();
+    slide();
+  }
+});
+
+// ─────────────── ХЕЛПЕРЫ ───────────────
+function roundRect(c, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
 }
-canvas.addEventListener('touchstart', move, {passive:false});
-canvas.addEventListener('touchmove', move, {passive:false});
-canvas.addEventListener('mousedown', move);
-canvas.addEventListener('mousemove', function(e){ if (e.buttons) move(e); });
 
-var last = 0;
+function burst(x, y, color, n, power) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = Math.random() * power + 1;
+    G.particles.push({
+      x, y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s - 1,
+      life: 30 + Math.random() * 20,
+      maxLife: 50,
+      color,
+      r: 2 + Math.random() * 3,
+    });
+  }
+}
 
-function loop(now){
-  var dt = (now - last) / 1000;
-  last = now;
-  if (dt > 0.1) dt = 0.1;
+function updateHUD() {
+  const livesEl = document.getElementById('lives');
+  let html = '';
+  for (let i = 0; i < 9; i++) {
+    html += i < G.lives ? '🐾' : '<span class="lost">🐾</span>';
+  }
+  livesEl.innerHTML = html;
+  document.getElementById('score').textContent = String(G.score).padStart(4, '0');
+}
 
-  if (alive) {
-    time -= dt;
-    if (time <= 0) { time = 0; endGame(); }
+// ─────────────── СПАВН ───────────────
+function spawnObstacle() {
+  const r = Math.random();
+  let o;
 
-    // Движение кота за пальцем
-    catX += (tx - catX) * 0.15;
-    catY += (ty - catY) * 0.15;
-
-    // Скорость
-    velX = catX - prevX;
-    velY = catY - prevY;
-    prevX = catX;
-    prevY = catY;
-
-    // === МОРГАНИЕ ===
-    anim.blinkCooldown -= dt;
-    anim.blinkTimer -= dt;
-    if (anim.blinkTimer <= 0 && anim.blinkCooldown <= 0) {
-      anim.blinkActive = true;
-      anim.blinkCooldown = 0.15;
-      anim.blinkTimer = 2 + Math.random() * 3;
-    }
-    if (anim.blinkActive) {
-      anim.blinkCooldown -= dt;
-      if (anim.blinkCooldown <= 0) anim.blinkActive = false;
-    }
-
-    // === ЗАТУХАНИЕ СЖАТИЯ ===
-    anim.eatSquash *= 0.88;
-
-    // === ШЛЕЙФ ===
-    if (Math.hypot(velX, velY) > 1.5) {
-      anim.tail.push({ x: catX, y: catY, r: catR, life: 1 });
-    }
-    for (var k = anim.tail.length - 1; k >= 0; k--) {
-      anim.tail[k].life -= dt * 2.5;
-      if (anim.tail[k].life <= 0) anim.tail.splice(k, 1);
-    }
-    if (anim.tail.length > 12) anim.tail.shift();
-
-    // === СТОЛКНОВЕНИЯ ===
-    for (var i = items.length - 1; i >= 0; i--){
-      var it = items[i];
-      var d = Math.hypot(catX - it.x, catY - it.y);
-
-      // Притяжение мелких
-      if (catR > it.r && d < catR * 2.5) {
-        var pull = (1 - d / (catR * 2.5)) * 2;
-        var a = Math.atan2(catY - it.y, catX - it.x);
-        it.x += Math.cos(a) * pull;
-        it.y += Math.sin(a) * pull;
-      }
-
-      if (d < catR + it.r * 0.5) {
-        if (catR > it.r * 1.05) {
-          catR += it.pts * 0.5;
-          size = Math.floor(catR);
-          anim.eatSquash = Math.min(1, 0.3 + it.pts * 0.1);
-          items.splice(i, 1);
-          addItem();
-        } else {
-          var a2 = Math.atan2(catY - it.y, catX - it.x);
-          catX += Math.cos(a2) * 3;
-          catY += Math.sin(a2) * 3;
-          velX *= 0.5; velY *= 0.5;
-        }
-      }
-    }
-
-    document.getElementById('sz').textContent = size;
-    document.getElementById('tm').textContent = Math.ceil(time);
+  if (r < 0.30) {
+    o = { type: 'box', w: 52, h: 48, y: groundY - 48 };
+  } else if (r < 0.55) {
+    o = { type: 'pepper', w: 34, h: 28, y: groundY - 28 };
+  } else if (r < 0.78) {
+    o = { type: 'vacuum', w: 64, h: 34, y: groundY - 34 };
+  } else {
+    o = { type: 'slipper', w: 52, h: 36, y: groundY - 70 };
   }
 
-  draw();
-  requestAnimationFrame(loop);
+  o.x = W + 40;
+  G.obstacles.push(o);
+
+  if (Math.random() < 0.55) {
+    const flyHigh = Math.random() < 0.5;
+    G.items.push({
+      x: W + 90 + Math.random() * 120,
+      y: flyHigh ? groundY - 130 : groundY - 48,
+      r: 13,
+      collected: false,
+    });
+  }
 }
 
-function draw(){
-  // ===== ФОН =====
-  var bg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H));
-  bg.addColorStop(0, '#0a0a20');
-  bg.addColorStop(1, '#000005');
-  ctx.fillStyle = bg;
+// ─────────────── ОБНОВЛЕНИЕ ───────────────
+function update(dt) {
+  G.t += dt;
+  G.bgOffset += G.speed * dt * 0.35;
+
+  if (!G.started || G.dead) {
+    updateParticles(dt);
+    return;
+  }
+
+  G.distance += G.speed * dt;
+  G.speed = Math.min(6 + G.distance * 0.0005, 16);
+  G.score = Math.floor(G.distance / 8);
+
+  // физика
+  cat.vy += GRAVITY * dt;
+  cat.y += cat.vy * dt;
+
+  if (cat.y >= groundY) {
+    cat.y = groundY;
+    cat.vy = 0;
+    cat.jumps = 0;
+  }
+
+  // плавное вращение — наклон вверх при прыжке, вниз при падении
+  const airborne = cat.y < groundY - 2;
+  const targetRot = airborne
+    ? Math.max(-0.22, Math.min(0.22, cat.vy * 0.014))
+    : Math.sin(G.t * 0.5) * 0.025; // лёгкое покачивание на бегу
+  cat.rot += (targetRot - cat.rot) * 0.15 * dt;
+
+  // сквош-стретч
+  const targetSY = cat.sliding ? 0.55 : (airborne ? 1.08 : 1);
+  const targetSX = cat.sliding ? 1.25 : (airborne ? 0.94 : 1);
+  cat.sy += (targetSY - cat.sy) * 0.22 * dt;
+  cat.sx += (targetSX - cat.sx) * 0.22 * dt;
+
+  if (cat.slideTimer > 0) {
+    cat.slideTimer -= dt;
+    if (cat.slideTimer <= 0) cat.sliding = false;
+  }
+
+  if (G.invuln > 0) G.invuln -= dt;
+
+  // спавн
+  G.spawnTimer -= dt;
+  if (G.spawnTimer <= 0) {
+    spawnObstacle();
+    const base = Math.max(42, 105 - G.speed * 5.5);
+    G.spawnTimer = base + Math.random() * 45;
+  }
+
+  const dx = G.speed * dt;
+  for (let i = G.obstacles.length - 1; i >= 0; i--) {
+    const o = G.obstacles[i];
+    o.x -= dx;
+    if (o.x + o.w < -60) G.obstacles.splice(i, 1);
+  }
+  for (let i = G.items.length - 1; i >= 0; i--) {
+    const it = G.items[i];
+    it.x -= dx;
+    if (it.x < -60) G.items.splice(i, 1);
+  }
+
+  // хитбокс — используем "видимого" кота внутри фото (примерно 55% площади)
+  const hbW = cat.sliding ? CAT_W * 0.75 : CAT_W * 0.5;
+  const hbH = cat.sliding ? CAT_H * 0.28 : CAT_H * 0.62;
+  const hb = {
+    x: cat.x - hbW / 2,
+    y: cat.y - hbH,
+    w: hbW,
+    h: hbH,
+  };
+
+  if (G.invuln <= 0) {
+    for (const o of G.obstacles) {
+      if (hb.x < o.x + o.w && hb.x + hb.w > o.x &&
+          hb.y < o.y + o.h && hb.y + hb.h > o.y) {
+        hit();
+        break;
+      }
+    }
+  }
+
+  for (const it of G.items) {
+    if (it.collected) continue;
+    const cx = hb.x + hb.w / 2, cy = hb.y + hb.h / 2;
+    const d = Math.hypot(cx - it.x, cy - it.y);
+    if (d < it.r + 32) {
+      it.collected = true;
+      G.distance += 120;
+      burst(it.x, it.y, '#f4b942', 8, 2.5);
+    }
+  }
+  G.items = G.items.filter(i => !i.collected);
+
+  updateParticles(dt);
+  if (G.shake > 0) G.shake -= dt;
+  updateHUD();
+}
+
+function hit() {
+  G.lives--;
+  G.invuln = 100;
+  G.shake = 18;
+  burst(cat.x, cat.y - 30, '#ff5a5a', 14, 3);
+  updateHUD();
+  if (G.lives <= 0) {
+    G.dead = true;
+    G.lives = 0;
+    updateHUD();
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = G.particles.length - 1; i >= 0; i--) {
+    const p = G.particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 0.35 * dt;
+    p.life -= dt;
+    if (p.life <= 0) G.particles.splice(i, 1);
+  }
+}
+
+// ─────────────── ФОН / ЗЕМЛЯ ───────────────
+function drawBackground() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, ( '#2a1f3d');
+ W grad.addColorStop(0.55, '#4 +a2f45');
+   grad.addColorStop(1, '#6400b3f3a');
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Звёзды
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  for (var i = 0; i < 60; i++){
-    var sx = (i * 137) % W;
-    var sy = (i * 91) % H;
-    var ss = (i % 3) * 0.6 + 0.6;
-    ctx.fillRect(sx, sy, ss, ss);
-  }
-
-  // ===== ШЛЕЙФ =====
-  for (var k = 0; k < anim.tail.length; k++){
-    var tr = anim.tail[k];
-    var alpha = tr.life * 0.35;
-    var rad = tr.r * (0.4 + tr.life * 0.6);
-    var grad = ctx.createRadialGradient(tr.x, tr.y, 0, tr.x, tr.y, rad);
-    grad.addColorStop(0, 'rgba(255,170,0,' + alpha + ')');
-    grad.addColorStop(1, 'rgba(255,100,0,0)');
-    ctx.beginPath();
-    ctx.arc(tr.x, tr.y, rad, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = '#ffb37a';
+  const off = G.bgOffset * 0.25;
+  for (let i = 0; i < 8; i++) {
+    const bx = ((i * 220 - off) %)) - 200;
+    const bh = 90 + (i % 3) * 45;
+    roundRect(ctx, bx, groundY - bh - 40, 130, bh, 10);
     ctx.fill();
   }
+  ctx.restore();
 
-  // ===== ОБЪЕКТЫ =====
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (var j = 0; j < items.length; j++){
-    var it = items[j];
-    var wob = Math.sin(performance.now()/400 + j) * 0.08;
-    ctx.save();
-    ctx.translate(it.x, it.y);
-    ctx.rotate(wob);
-    ctx.shadowColor = 'rgba(255,170,0,0.5)';
-    ctx.shadowBlur = 8;
-    ctx.font = (it.r * 2) + 'px sans-serif';
-    ctx.fillText(it.e, 0, 0);
-    ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#000';
+  const off2 = G.bgOffset * 0.6;
+  for (let i = 0; i < 12; i++) {
+    const bx = ((i * 160 - off2) % (W + 320)) - 160;
+    ctx.fillRect(bx, groundY - 60, 8, 60);
   }
-  ctx.shadowBlur = 0;
-
-  // ===== КОТ =====
-  drawLivingCat();
+  ctx.restore();
 }
 
-function drawLivingCat(){
-  var t = performance.now() / 1000;
+function drawGround() {
+  const g = ctx.createLinearGradient(0, groundY, 0, H);
+  g.addColorStop(0, '#7a4a34');
+  g.addColorStop(1, '#4a2a1e');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, groundY, W, H - groundY);
 
-  // === РАСЧЁТЫ АНИМАЦИИ ===
-  var speed = Math.hypot(velX, velY);
-  var cappedSpeed = Math.min(speed, 15);
+  ctx.fillStyle = '#a86a44';
+  ctx.fillRect(0, groundY, W, 5);
 
-  var breathe = 1 + Math.sin(t * 3) * 0.05;
-
-  var leanX = Math.max(-0.25, Math.min(0.25, velX * 0.02));
-
-  var stretchX = 1 + (cappedSpeed * 0.008) - (anim.eatSquash * 0.25);
-  var stretchY = 1 - (cappedSpeed * 0.005) + (anim.eatSquash * 0.35);
-
-  if (anim.blinkActive) {
-    stretchY *= 0.35;
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  const off = G.bgOffset % 90;
+  for (let x = -off; x < W + 90; x += 90) {
+    ctx.beginPath();
+    ctx.moveTo(x, groundY + 8);
+    ctx.lineTo(x - 30, H);
+    ctx.stroke();
   }
+  ctx.restore();
+}
 
-  var idleWobX = Math.sin(t * 2) * 2;
-  var idleWobY = Math.cos(t * 2.4) * 2;
-
-  var idleTilt = Math.sin(t * 1.3) * 0.08;
-
-  var totalTilt = idleTilt + leanX;
-  var drawR = catR * breathe;
-
-  // === АУРА ===
-  var aura = ctx.createRadialGradient(catX, catY, drawR * 0.6, catX, catY, drawR * 2);
-  aura.addColorStop(0, 'rgba(255,180,80,0.4)');
-  aura.addColorStop(0.5, 'rgba(255,100,200,0.15)');
-  aura.addColorStop(1, 'rgba(255,100,200,0)');
+// ─────────────── ПРЕПЯТСТВИЯ ───────────────
+function drawObstacle(o) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
-  ctx.arc(catX, catY, drawR * 2, 0, Math.PI * 2);
-  ctx.fillStyle = aura;
+  ctx.ellipse(o.x + o.w / 2, groundY + 3, o.w * 0.5, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // === КОТ ===
-  ctx.save();
-  ctx.translate(catX + idleWobX, catY + idleWobY);
-  ctx.rotate(totalTilt);
-  ctx.scale(stretchX, stretchY);
-
-  if (catOK) {
-    ctx.save();
+  if (o.type === 'box') {
+    ctx.fillStyle = '#c94a1e';
+    roundRect(ctx, o.x, o.y + 3, o.w, o.h, 7); ctx.fill();
+    ctx.fillStyle = '#e35d2a';
+    roundRect(ctx, o.x, o.y, o.w, o.h, 7); ctx.fill();
+    ctx.fillStyle = '#ff8a55';
+    roundRect(ctx, o.x + 4, o.y + 4, o.w - 8, o.h * 0.32, 4); ctx.fill();
+    ctx.fillStyle = '#a83a14';
+    ctx.fillRect(o.x + 7, o.y + o.h * 0.55, o.w - 14, 3);
+  } else if (o.type === 'pepper') {
+    ctx.fillStyle = '#3f7a30';
     ctx.beginPath();
-    ctx.arc(0, 0, drawR, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(cat, -drawR, -drawR, drawR * 2, drawR * 2);
-    ctx.restore();
+    ctx.ellipse(o.x + o.w / 2 + 1, o.y + o.h / 2 + 2, o.w / 2, o.h / 2, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5aa83f';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 2, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8fd96a';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2 - 4, o.y + o.h / 2 - 4, o.w / 5, o.h / 6, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (o.type === 'vacuum') {
+    ctx.fillStyle = '#23232c';
+    roundRect(ctx, o.x, o.y, o.w, o.h, o.h / 2); ctx.fill();
+    ctx.fillStyle = '#3a3a4a';
+    roundRect(ctx, o.x + 4, o.y + 4, o.w - 8, o.h - 10, (o.h - 10) / 2); ctx.fill();
+    ctx.fillStyle = '#6a6a85';
+    ctx.beginPath();
+    ctx.arc(o.x + o.w / 2, o.y + o.h / 2, o.h * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ff4a4a';
+    ctx.beginPath();
+    ctx.arc(o.x + o.w / 2, o.y + o.h * 0.32, 3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (o.type === 'slipper') {
+    ctx.fillStyle = '#8c3e3a';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2 + 2, o.y + o.h / 2 + 3, o.w / 2, o.h / 2, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#b8544f';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 2, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#d97070';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2 - 8, o.y + o.h / 2 - 2, o.w / 3.5, o.h / 3.5, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawFish(it) {
+  ctx.save();
+  ctx.translate(it.x, it.y);
+  const bob = Math.sin(G.t * 0.09 + it.x * 0.02) * 3;
+  ctx.translate(0, bob);
+
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = '#ffd66b';
+  ctx.beginPath();
+  ctx.arc(0, 0, it.r * 1.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  const r = it.r;
+  ctx.fillStyle = '#e0a52e';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.8, 0);
+  ctx.lineTo(-r * 1.6, -r * 0.7);
+  ctx.lineTo(-r * 1.6, r * 0.7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#f4b942';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r, r * 0.68, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffe08a';
+  ctx.beginPath();
+  ctx.ellipse(0, -r * 0.15, r * 0.6, r * 0.25, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2b2b1e';
+  ctx.beginPath();
+  ctx.arc(r * 0.45, -r * 0.1, r * 0.14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ─────────────── ГЛАВНЫЙ ГЕРОЙ ───────────────
+function drawCat() {
+  const cx = cat.x;
+  const by = cat.y;
+
+  // мигание при неуязвимости
+  if (G.invuln > 0 && Math.floor(G.t / 4) % 2 === 0) return;
+
+  // тень
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath();
+  const shadowScale = Math.max(0.4, 1 - (groundY - by) / 400);
+  ctx.ellipse(cx, groundY + 5, CAT_W * 0.42 * shadowScale, 7 * shadowScale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(cx, by);
+  ctx.rotate(cat.rot);
+  ctx.scale(cat.sx, cat.sy);
+
+  if (imgReady) {
+    // реальное фото кота
+    ctx.drawImage(
+      catImg,
+      -CAT_W / 2,
+      -CAT_H,
+      CAT_W,
+      CAT_H
+    );
   } else {
-    ctx.font = (drawR * 2) + 'px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🐱', 0, 0);
+    // fallback: нарисованный кот (на случай, если cat.PNG не загрузился)
+    drawFallbackCat();
   }
 
   ctx.restore();
+}
 
-  // === ЗОЛОТОЕ КОЛЬЦО ===
-  ctx.beginPath();
-  ctx.arc(catX + idleWobX, catY + idleWobY, drawR + 3, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,200,100,0.9)';
+function drawFallbackCat() {
+  const bw = CAT_W * 0.55, bh = CAT_H * 0.42;
+  const topY = -CAT_H + (CAT_H - bh) * 0.5;
+
+  ctx.fillStyle = '#a89a78';
+  roundRect(ctx, -bw / 2, topY, bw, bh, 14);
+  ctx.fill();
+
+  ctx.strokeStyle = '#6e6144';
   ctx.lineWidth = 3;
-  ctx.shadowColor = '#ffaa00';
-  ctx.shadowBlur = 18;
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  // Бегущий блик
-  ctx.beginPath();
-  var a1 = t * 2;
-  ctx.arc(catX + idleWobX, catY + idleWobY, drawR + 3, a1, a1 + Math.PI * 0.5);
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
-
-  // === ИСКРЫ при поедании ===
-  if (anim.eatSquash > 0.3) {
-    for (var i = 0; i < 5; i++){
-      var ang = Math.random() * Math.PI * 2;
-      var dist = drawR * (1.2 + Math.random() * 0.6);
-      var px = catX + Math.cos(ang) * dist;
-      var py = catY + Math.sin(ang) * dist;
-      ctx.beginPath();
-      ctx.arc(px, py, 3 * anim.eatSquash, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,220,100,' + anim.eatSquash + ')';
-      ctx.fill();
-    }
+  for (let i = 0; i < 3; i++) {
+    const sx = -bw / 2 + 12 + i * 11;
+    ctx.beginPath();
+    ctx.moveTo(sx, topY + 5);
+    ctx.lineTo(sx + 3, topY + bh - 5);
+    ctx.stroke();
   }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.ellipse(bw / 2 - 14, topY + bh * 0.55, 11, bh * 0.42, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const hx = 0, hy = topY - 6;
+
+  ctx.fillStyle = '#a89a78';
+  ctx.beginPath(); ctx.arc(hx, hy, 16, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = '#2b2b1e';
+  ctx.beginPath();
+  ctx.arc(hx - 5, hy - 2, 3.5, 0, Math.PI * 2);
+  ctx.arc(hx + 5, hy - 2, 3.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-function endGame(){
-  alive = false;
-  document.getElementById('over').style.display = 'block';
-  document.getElementById('fs').textContent = size;
+function drawParticles() {
+  for (const p of G.particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 
-start();
+// ─────────────── ЭКРАНЫ ───────────────
+function drawStartScreen() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+
+  // фото кота сверху по центру
+  if (imgReady) {
+    const s = Math.min(W * 0.45, 220);
+    ctx.save();
+    ctx.translate(W / 2, H * 0.22);
+    ctx.rotate(Math.sin(G.t * 0.04) * 0.03);
+    ctx.drawImage(catImg, -s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 40px -apple-system, sans-serif';
+  ctx.fillText('КАПТЕР', W / 2, H * 0.42);
+  ctx.font = 'bold 24px -apple-system, sans-serif';
+  ctx.fillStyle = '#ffb37a';
+  ctx.fillText('9 ЖИЗНЕЙ', W / 2, H * 0.475);
+
+  ctx.font = '16px -apple-system, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillText('ТАП — прыжок / двойной прыжок', W / 2, H * 0.56);
+  ctx.fillText('СВАЙП ВНИЗ — подкат', W / 2, H * 0.60);
+  ctx.fillText('Собирай 🐟, уворачивайся!', W / 2, H * 0.645);
+
+  const pulse = 1 + Math.sin(G.t * 0.1) * 0.05;
+  ctx.save();
+  ctx.translate(W / 2, H * 0.78);
+  ctx.scale(pulse, pulse);
+  ctx.fillStyle = '#ffb37a';
+  roundRect(ctx, -110, -28, 220, 56, 28);
+  ctx.fill();
+  ctx.fillStyle = '#2a1f3d';
+  ctx.font = 'bold 20px -apple-system, sans-serif';
+  ctx.fillText('ТАПНИ ЧТОБЫ НАЧАТЬ', 0, 7);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (imgReady) {
+    const s = Math.min(W * 0.35, 160);
+    ctx.save();
+    ctx.translate(W / 2, H * 0.24);
+    ctx.rotate(-0.06);
+    ctx.drawImage(catImg, -s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff5a5a';
+  ctx.font = 'bold 36px -apple-system, sans-serif';
+  ctx.fillText('КАПТЕР УСТАЛ', W / 2, H * 0.40);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px -apple-system, sans-serif';
+  ctx.fillText('Все 9 жизней истрачены', W / 2, H * 0.455);
+
+  ctx.fillStyle = '#ffb37a';
+  ctx.font = 'bold 34px -apple-system, sans-serif';
+  ctx.fillText(String(G.score), W / 2, H * 0.545);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '14px -apple-system, sans-serif';
+  ctx.fillText('ОЧКОВ', W / 2, H * 0.585);
+
+  const pulse = 1 + Math.sin(G.t * 0.12) * 0.05;
+  ctx.save();
+  ctx.translate(W / 2, H * 0.75);
+  ctx.scale(pulse, pulse);
+  ctx.fillStyle = '#ffb37a';
+  roundRect(ctx, -110, -28, 220, 56, 28);
+  ctx.fill();
+  ctx.fillStyle = '#2a1f3d';
+  ctx.font = 'bold 20px -apple-system, sans-serif';
+  ctx.fillText('ЕЩЁ РАЗ', 0, 7);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+function render() {
+  ctx.save();
+
+  if (G.shake > 0) {
+    const s = G.shake;
+    ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+  }
+
+  drawBackground();
+  drawGround();
+
+  for (const it of G.items) drawFish(it);
+  for (const o of G.obstacles) drawObstacle(o);
+
+  if (G.started && !G.dead) drawCat();
+
+  drawParticles();
+  ctx.restore();
+
+  if (!G.started) drawStartScreen();
+  if (G.dead) drawGameOver();
+}
+
+// ─────────────── ЦИКЛ ───────────────
+let lastT = performance.now();
+function loop(now) {
+  const dt = Math.min((now - lastT) / 16.667, 2.5);
+  lastT = now;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+cat.x = Math.max(100, W * 0.22);
+cat.y = groundY;
+updateHUD();
 requestAnimationFrame(loop);
+
+})();
 </script>
 </body>
 </html>
