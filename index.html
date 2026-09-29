@@ -24,25 +24,25 @@
     color:#fff; font-size:22px; text-align:center;
     display:none; background:rgba(0,0,0,0.9); padding:28px 36px;
     border:2px solid #0ff; border-radius:16px;
-    box-shadow:0 0 40px #0ff, inset 0 0 20px rgba(0,255,255,0.2);
+    box-shadow:0 0 40px #0ff;
   }
   #gameover .title { font-size:28px; margin-bottom:10px; color:#0ff; }
   #gameover button {
     margin-top:18px; padding:12px 32px; font-size:18px;
     background:linear-gradient(135deg,#0ff,#f0f); border:none; border-radius:10px;
-    font-weight:bold; color:#000; cursor:pointer;
+    font-weight:bold; color:#000;
   }
 </style>
 </head>
 <body>
 <div id="timer-bar"></div>
 <div id="ui">
-  <div class="row">🐱 Размер: <span id="score">15</span></div>
+  <div class="row">🐱 Размер: <span id="score">18</span></div>
   <div class="row">⏱️ Время: <span id="time">60</span></div>
 </div>
 <div id="gameover">
   <div class="title">Кот обожрался</div>
-  <div>Размер кота: <span id="finalScore">0</span></div>
+  <div>Размер: <span id="finalScore">0</span></div>
   <button id="restart">Ещё раз</button>
 </div>
 <canvas id="c"></canvas>
@@ -63,15 +63,14 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// ===== ЗАГРУЗКА ФОТО КОТА =====
-// ВАЖНО: Если твой файл называется иначе (например, IMG_1234.JPG),
-// поменяй имя в строке ниже на своё:
+// ===== ФОТО КОТА =====
 const catImg = new Image();
 catImg.src = 'cat.png';
 let catLoaded = false;
 catImg.onload = () => { catLoaded = true; };
+catImg.onerror = () => { console.log('Не загрузилось фото cat.png'); };
 
-// ===== Типы объектов =====
+// ===== Объекты =====
 const OBJECT_TYPES = [
   { emoji: '🪙', r: 8,  points: 1 },
   { emoji: '🍕', r: 12, points: 2 },
@@ -84,10 +83,10 @@ const OBJECT_TYPES = [
 let hole, objects, particles, score, timeLeft, gameActive, lastTime, shake;
 
 function reset() {
-  hole = { x: W/2, y: H/2, r: 18, targetX: W/2, targetY: H/2, vx: 0, vy: 0 };
+  hole = { x: W/2, y: H/2, r: 28, targetX: W/2, targetY: H/2, vx: 0, vy: 0 };
   objects = [];
   particles = [];
-  score = 18;
+  score = 28;
   timeLeft = 60;
   gameActive = true;
   shake = 0;
@@ -112,14 +111,12 @@ function spawnObject() {
     if (rnd <= 0) { idx = i; break; }
   }
   const type = OBJECT_TYPES[idx];
-
   let x, y, tries = 0;
   do {
     x = Math.random() * (W - 60) + 30;
     y = Math.random() * (H - 60) + 30;
     tries++;
   } while (Math.hypot(x - hole.x, y - hole.y) < hole.r + 120 && tries < 20);
-
   objects.push({
     x, y, r: type.r, emoji: type.emoji, points: type.points,
     rot: (Math.random() - 0.5) * 0.4,
@@ -127,7 +124,6 @@ function spawnObject() {
   });
 }
 
-// ===== Управление =====
 function setTarget(e) {
   if (!gameActive) return;
   e.preventDefault();
@@ -141,7 +137,6 @@ canvas.addEventListener('touchmove', setTarget, { passive: false });
 canvas.addEventListener('mousedown', setTarget);
 canvas.addEventListener('mousemove', (e) => { if (e.buttons) setTarget(e); });
 
-// ===== Частицы =====
 function spawnParticles(x, y, color, count) {
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -153,10 +148,8 @@ function spawnParticles(x, y, color, count) {
   }
 }
 
-// ===== Обновление =====
 function update(dt) {
   if (!gameActive) return;
-
   timeLeft -= dt;
   if (timeLeft <= 0) { timeLeft = 0; endGame(); return; }
   document.getElementById('timer-bar').style.width = (timeLeft / 60 * 100) + '%';
@@ -174,14 +167,12 @@ function update(dt) {
     const obj = objects[i];
     obj.wobble += dt * 2;
     const dist = Math.hypot(hole.x - obj.x, hole.y - obj.y);
-
     if (hole.r > obj.r && dist < hole.r * 2.5) {
       const pull = (1 - dist / (hole.r * 2.5)) * 2;
       const a = Math.atan2(hole.y - obj.y, hole.x - obj.x);
       obj.x += Math.cos(a) * pull;
       obj.y += Math.sin(a) * pull;
     }
-
     if (dist < hole.r + obj.r * 0.6) {
       if (hole.r > obj.r * 1.05) {
         hole.r += obj.points * 0.35;
@@ -209,26 +200,21 @@ function update(dt) {
     p.life -= dt * 1.8;
     if (p.life <= 0) particles.splice(i, 1);
   }
-
   if (shake > 0) shake *= 0.9;
-
   document.getElementById('score').textContent = score;
   document.getElementById('time').textContent = Math.ceil(timeLeft);
 }
 
-// ===== Отрисовка =====
 function draw() {
   ctx.save();
   if (shake > 0.5) {
     ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
   }
-
   const bg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H));
   bg.addColorStop(0, '#0a0a20');
   bg.addColorStop(1, '#000005');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
-
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   for (let i = 0; i < 60; i++) {
     const sx = (i * 137.5) % W;
@@ -236,7 +222,6 @@ function draw() {
     const ss = (i % 3) * 0.5 + 0.5;
     ctx.fillRect(sx, sy, ss, ss);
   }
-
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   objects.forEach(obj => {
@@ -250,7 +235,6 @@ function draw() {
     ctx.fillText(obj.emoji, 0, 0);
     ctx.restore();
   });
-
   particles.forEach(p => {
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
@@ -259,25 +243,24 @@ function draw() {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
-
   drawCat();
   ctx.restore();
 }
 
-// ===== ОЖИВШИЙ КОТ =====
+// ===== ЖИВОЙ КОТ =====
 function drawCat() {
   const { x, y, r } = hole;
   const t = performance.now() * 0.001;
 
-  // Дыхание (пульсация)
-  const breathe = 1 + Math.sin(t * 3) * 0.06;
-  // Покачивание
-  const wobbleX = Math.sin(t * 2) * 2;
-  const wobbleY = Math.cos(t * 2.5) * 2;
+  // Дыхание — пульсация
+  const breathe = 1 + Math.sin(t * 3) * 0.07;
+  // Покачивание из стороны в сторону
+  const wobbleX = Math.sin(t * 2) * 3;
+  const wobbleY = Math.cos(t * 2.5) * 3;
   // Наклон головы
-  const tilt = Math.sin(t * 1.5) * 0.12;
+  const tilt = Math.sin(t * 1.5) * 0.15;
 
-  // Золотая аура вокруг кота
+  // Золотая аура
   const halo = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 2.2);
   halo.addColorStop(0, 'rgba(255,180,80,0.55)');
   halo.addColorStop(0.5, 'rgba(255,100,200,0.25)');
@@ -287,22 +270,19 @@ function drawCat() {
   ctx.fillStyle = halo;
   ctx.fill();
 
-  // Сам кот
+  // Кот
   ctx.save();
   ctx.translate(x + wobbleX, y + wobbleY);
   ctx.rotate(tilt);
-
   const size = r * 2.2 * breathe;
 
   if (catLoaded) {
-    // Круглая маска — чтобы фото было как аватарка
     ctx.beginPath();
     ctx.arc(0, 0, size / 2, 0, Math.PI * 2);
     ctx.closePath();
     ctx.clip();
     ctx.drawImage(catImg, -size/2, -size/2, size, size);
   } else {
-    // Заглушка, пока фото не загрузилось
     ctx.font = `${size}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -310,7 +290,7 @@ function drawCat() {
   }
   ctx.restore();
 
-  // Неоновое кольцо вокруг кота
+  // Неоновое кольцо
   ctx.beginPath();
   ctx.arc(x + wobbleX, y + wobbleY, r * 1.1 * breathe, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(255,200,100,0.9)';
@@ -320,7 +300,7 @@ function drawCat() {
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Бегущий блик по кольцу
+  // Бегущий блик
   ctx.beginPath();
   const a1 = t * 2;
   ctx.arc(x + wobbleX, y + wobbleY, r * 1.1 * breathe, a1, a1 + Math.PI * 0.5);
